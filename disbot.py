@@ -11,9 +11,12 @@ intents = discord.Intents.default()
 intents.members = True  
 intents.message_content = True  
 
-bot = commands.Bot(command_prefix='!', intents=intents, application_id="1306388199387697265")
+bot = commands.Bot(command_prefix='!', intents=intents, application_id="")
 
-log_dir = '/home/hutcch/discordbot/'
+afk_users = {}
+blackjack_games = {}
+
+log_dir = 'D:\discordbot'
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -33,6 +36,18 @@ def save_user_data():
     with open(user_data_file, 'w') as f:
         json.dump(user_data, f)
 
+def draw_card():
+    return random.choice(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'])
+
+def calculate_score(cards):
+    values = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 10, 'Q': 10, 'K': 10, 'A': 11}
+    score = sum(values[card] for card in cards)
+    aces = cards.count('A')
+    while score > 21 and aces:
+        score -= 10
+        aces -= 1
+    return score
+
 @tasks.loop(minutes=10)
 async def market_fluctuation():
     global coin_value
@@ -46,7 +61,7 @@ async def on_ready():
     print(f'Logged in as {bot.user.name}')
     market_fluctuation.start()
 
-# Uptime command
+
 @bot.command()
 async def uptime(ctx):
     """Shows how long the bot has been online."""
@@ -242,20 +257,91 @@ async def buycoin(ctx, amount: int):
     else:
         await ctx.send(f"{ctx.author.mention}, you don't have enough money to buy {amount} coins.")
 
-       
+@bot.command()
+async def afk(ctx, *, reason="AFK"): 
+    afk_users[ctx.author.id] = reason
+    await ctx.send(f"{ctx.author.mention} is now AFK: {reason}")
+
+@bot.command()
+async def back(ctx):
+    if ctx.author.id in afk_users:
+        del afk_users[ctx.author.id]
+        await ctx.send(f"{ctx.author.mention} is back!")
+    else:
+        await ctx.send("You're not AFK.")
+
 @bot.event
 async def on_message(message):
-    """Logs messages in a specific channel to a file."""
-    if message.author == bot.user:
-        return  
-
-    log_channel_id = 1249369462654898260  #
-
-    if message.channel.id == log_channel_id:
-        log_file = os.path.join(log_dir, "messages_log.txt")
-        with open(log_file, "a") as f:
-            f.write(f"{datetime.utcnow()} - {message.author}: {message.content}\n")
-
+    if message.mentions:
+        for user in message.mentions:
+            if user.id in afk_users:
+                await message.channel.send(f"{user.mention} is AFK: {afk_users[user.id]}")
     await bot.process_commands(message)
+
+@bot.command()
+async def blackjack(ctx):
+    user = ctx.author.id
+    if user in blackjack_games:
+        await ctx.send("You already have a game in progress!")
+        return
+    
+    player_hand = [draw_card(), draw_card()]
+    dealer_hand = [draw_card()]
+    blackjack_games[user] = {'player': player_hand, 'dealer': dealer_hand}
+    
+    await ctx.send(f"{ctx.author.mention}, your hand: {player_hand} ({calculate_score(player_hand)}). Dealer's hand: {dealer_hand}")
+
+@bot.command()
+async def hit(ctx):
+    user = ctx.author.id
+    if user not in blackjack_games:
+        await ctx.send("Start a game first using !blackjack!")
+        return
+    
+    blackjack_games[user]['player'].append(draw_card())
+    score = calculate_score(blackjack_games[user]['player'])
+    
+    if score > 21:
+        await ctx.send(f"{ctx.author.mention}, you busted! Your hand: {blackjack_games[user]['player']} ({score})")
+        del blackjack_games[user]
+    else:
+        await ctx.send(f"{ctx.author.mention}, your new hand: {blackjack_games[user]['player']} ({score})")
+
+@bot.command()
+async def stand(ctx):
+    user = ctx.author.id
+    if user not in blackjack_games:
+        await ctx.send("Start a game first using !blackjack!")
+        return
+    
+    dealer_hand = blackjack_games[user]['dealer']
+    while calculate_score(dealer_hand) < 17:
+        dealer_hand.append(draw_card())
+    
+    player_score = calculate_score(blackjack_games[user]['player'])
+    dealer_score = calculate_score(dealer_hand)
+    
+    if dealer_score > 21 or player_score > dealer_score:
+        result = "You win!"
+    elif player_score < dealer_score:
+        result = "You lose!"
+    else:
+        result = "It's a tie!"
+    
+    await ctx.send(f"{ctx.author.mention}, your hand: {blackjack_games[user]['player']} ({player_score}). Dealer's hand: {dealer_hand} ({dealer_score}). {result}")
+    del blackjack_games[user]
+
+@bot.command()
+async def slots(ctx, bet: int):
+    symbols = ['🍒', '🍋', '🔔', '🍉', '⭐', '7️⃣']
+    result = [random.choice(symbols) for _ in range(3)]
+    await ctx.send(f"{ctx.author.mention} spun: {' | '.join(result)}")
+    
+    if len(set(result)) == 1:
+        await ctx.send(f"JACKPOT! You won {bet * 5} coins!")
+    elif len(set(result)) == 2:
+        await ctx.send(f"Nice! You won {bet * 2} coins!")
+    else:
+        await ctx.send(f"You lost {bet} coins. Try again!")
 
 bot.run(TOKEN)
