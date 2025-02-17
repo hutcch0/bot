@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 import json
 
-TOKEN = ''
+TOKEN = '123...'
 
 intents = discord.Intents.default()
 intents.members = True  
