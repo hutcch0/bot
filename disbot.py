@@ -11,7 +11,7 @@ intents = discord.Intents.default()
 intents.members = True  
 intents.message_content = True  
 
-bot = commands.Bot(command_prefix='!', intents=intents, application_id="")
+bot = commands.Bot(command_prefix='!', intents=intents, application_id="1306388199387697265")
 
 afk_users = {}
 blackjack_games = {}
@@ -55,11 +55,61 @@ async def market_fluctuation():
     coin_value = max(1, min(coin_value + change, 250)) 
     print(f"Coin value changed! New value: {coin_value}")
 
+@bot.event
+async def on_raw_reaction_add(payload):
+    """Handles the reactions to the report messages."""
+
+    if payload.channel_id != 1309979922319540305:  
+        return
+
+    message = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
+
+    if message.author != bot.user:
+        return
+
+    if payload.user_id == bot.user.id:
+        return 
+
+    member = await bot.get_guild(payload.guild_id).fetch_member(payload.user_id)
+    if not member or not member.guild_permissions.kick_members:
+        return  
+
+    if payload.emoji.name == "✅":
+
+        await message.channel.send(f"Report claimed by {member.mention}.")
+        await message.edit(content=f"**Report claimed**\n{message.content}") 
+
+    elif payload.emoji.name == "❌":
+        # Mark the report as "closed"
+        await message.channel.send(f"Report closed by {member.mention}.")
+        await message.edit(content=f"**Report closed**\n{message.content}") 
+
+    await message.remove_reaction("✅", member)
+    await message.remove_reaction("❌", member)
 
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
     market_fluctuation.start()
+
+@bot.command()
+async def report(ctx, member: discord.Member, *, reason: str):
+    """Allows users to report someone."""
+    report_channel_id = 1309979922319540305 
+    report_channel = bot.get_channel(report_channel_id)
+
+    if not report_channel:
+        await ctx.send("Error: Could not find the report channel.")
+        return
+
+    report_message = f"**Report received**\n**Reported User:** {member.mention}\n**Reported by:** {ctx.author.mention}\n**Reason:** {reason}\n**Timestamp:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    report_msg = await report_channel.send(report_message)
+
+    await report_msg.add_reaction("✅") 
+    await report_msg.add_reaction("❌") 
+
+    await ctx.send(f"Thank you for your report, {ctx.author.mention}. The moderation team will review it shortly.")
 
 
 @bot.command()
