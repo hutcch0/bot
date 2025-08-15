@@ -2,10 +2,28 @@ import discord
 from discord.ext import commands, tasks
 import random
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
+import mysql.connector
 
-TOKEN = '123...'
+# ========== CONFIGURATION ==========
+TOKEN = '...123'
+
+# MySQL connection info
+MYSQL_HOST = '123...'
+MYSQL_PORT = 2311
+MYSQL_USER = '123'
+MYSQL_PASSWORD = '123'
+MYSQL_DB = '123'
+
+def get_db():
+    return mysql.connector.connect(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DB
+    )
 
 intents = discord.Intents.default()
 intents.members = True  
@@ -16,7 +34,7 @@ bot = commands.Bot(command_prefix='!', intents=intents, application_id="13063881
 afk_users = {}
 blackjack_games = {}
 
-log_dir = 'D:\discordbot'
+log_dir = '/home/container/'
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -29,7 +47,6 @@ else:
     user_data = {}
 
 coin_value = 50
-
 startup_time = datetime.utcnow()
 
 def save_user_data():
@@ -56,9 +73,26 @@ async def market_fluctuation():
     print(f"Coin value changed! New value: {coin_value}")
 
 @bot.event
-async def on_raw_reaction_add(payload):
-    """Handles the reactions to the report messages."""
+async def on_ready():
+    print(f'Logged in as {bot.user.name}')
+    market_fluctuation.start()
 
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bans (
+            user_id BIGINT PRIMARY KEY,
+            reason TEXT,
+            banned_by BIGINT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    db.commit()
+    cursor.close()
+    db.close()
+
+@bot.event
+async def on_raw_reaction_add(payload):
     if payload.channel_id != 1309979922319540305:  
         return
 
@@ -75,22 +109,89 @@ async def on_raw_reaction_add(payload):
         return  
 
     if payload.emoji.name == "✅":
-
         await message.channel.send(f"Report claimed by {member.mention}.")
         await message.edit(content=f"**Report claimed**\n{message.content}") 
-
     elif payload.emoji.name == "❌":
-        # Mark the report as "closed"
         await message.channel.send(f"Report closed by {member.mention}.")
         await message.edit(content=f"**Report closed**\n{message.content}") 
 
     await message.remove_reaction("✅", member)
     await message.remove_reaction("❌", member)
 
+# ========== GLOBAL BAN SYSTEM ==========
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, user: discord.User, *, reason="No reason provided"):
+    """Globally ban a user and add to the global ban database."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "REPLACE INTO bans (user_id, reason, banned_by) VALUES (%s, %s, %s)",
+        (user.id, reason, ctx.author.id)
+    )
+    db.commit()
+    cursor.close()
+    db.close()
+
+    for guild in bot.guilds:
+        member = guild.get_member(user.id)
+        if member:
+            try:
+                await guild.ban(member, reason=f"Global ban: {reason}")
+            except Exception as e:
+                print(f"Failed to ban in {guild.name}: {e}")
+    await ctx.send(f"{user} has been globally banned for: {reason}")
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, user: discord.User):
+    """Globally unban a user and remove from the global ban database."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM bans WHERE user_id = %s", (user.id,))
+    db.commit()
+    cursor.close()
+    db.close()
+    for guild in bot.guilds:
+        try:
+            await guild.unban(user)
+        except Exception:
+            pass
+    await ctx.send(f"{user} has been globally unbanned.")
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def banlist(ctx):
+    """Show the global ban list."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT user_id, reason FROM bans")
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+    if not rows:
+        await ctx.send("No users are globally banned.")
+        return
+    msg = "\n".join([f"<@{row[0]}>: {row[1]}" for row in rows])
+    await ctx.send(f"**Global Ban List:**\n{msg}")
+
 @bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user.name}')
-    market_fluctuation.start()
+async def on_member_join(member):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT reason FROM bans WHERE user_id = %s", (member.id,))
+    row = cursor.fetchone()
+    cursor.close()
+    db.close()
+    if row:
+        try:
+            await member.guild.ban(member, reason=f"Global ban: {row[0]}")
+            print(f"Auto-banned {member} in {member.guild.name}")
+        except Exception as e:
+            print(f"Failed to auto-ban {member} in {member.guild.name}: {e}")
+
+# ========== END GLOBAL BAN SYSTEM ==========
 
 @bot.command()
 async def report(ctx, member: discord.Member, *, reason: str):
@@ -111,73 +212,53 @@ async def report(ctx, member: discord.Member, *, reason: str):
 
     await ctx.send(f"Thank you for your report, {ctx.author.mention}. The moderation team will review it shortly.")
 
-
 @bot.command()
 async def uptime(ctx):
-    """Shows how long the bot has been online."""
     uptime_duration = datetime.utcnow() - startup_time
     days = uptime_duration.days
     hours = uptime_duration.seconds // 3600
     minutes = (uptime_duration.seconds // 60) % 60
     seconds = uptime_duration.seconds % 60
-
     await ctx.send(f"The bot has been online for {days} days, {hours} hours, {minutes} minutes, and {seconds} seconds.")
 
 @bot.command()
 async def coinvalue(ctx):
-    """Shows the current coin value."""
     await ctx.send(f"The current coin value is {coin_value}.")
 
 @bot.command()
 async def sellcoin(ctx, amount: int):
-    """Sell coins for money."""
     user_id = str(ctx.author.id)
     coins = user_data.get(user_id, {}).get('coins', 0)
-
     if coins < amount:
         await ctx.send(f"{ctx.author.mention}, you don't have enough coins to sell.")
         return
-
     total_value = amount * coin_value
     user_data[user_id]['coins'] -= amount
     user_data[user_id]['money'] = user_data.get(user_id, {}).get('money', 1000) + total_value
-
     save_user_data()
-
     await ctx.send(f"{ctx.author.mention} sold {amount} coins for ${total_value}. You now have {user_data[user_id]['coins']} coins and ${user_data[user_id]['money']}.")
 
 @bot.command()
 @commands.is_owner()  
 async def stop(ctx):
-    """Stops the bot."""
     await ctx.send("Stopping the bot...")
     await bot.close()
 
 @bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason=None):
-    """Kicks a member from the server."""
     await member.kick(reason=reason)
     await ctx.send(f'{member.mention} has been kicked.')
 
 @bot.command()
-@commands.has_permissions(ban_members=True)
-async def ban(ctx, member: discord.Member, *, reason=None):
-    """Bans a member from the server."""
-    await member.ban(reason=reason)
-    await ctx.send(f'{member.mention} has been banned.')
-
-@bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, limit: int):
-    """Deletes a number of messages."""
     await ctx.channel.purge(limit=limit + 1)  
     await ctx.send(f'Deleted {limit} messages.', delete_after=5)
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def mute(ctx, member: discord.Member, *, reason=None):
-    """Mutes a member."""
     muted_role = discord.utils.get(ctx.guild.roles, name='Muted')
     await member.add_roles(muted_role, reason=reason)
     await ctx.send(f'{member.mention} has been muted.')
@@ -185,7 +266,6 @@ async def mute(ctx, member: discord.Member, *, reason=None):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def unmute(ctx, member: discord.Member, *, reason=None):
-    """Unmutes a member."""
     muted_role = discord.utils.get(ctx.guild.roles, name='Muted')
     await member.remove_roles(muted_role, reason=reason)
     await ctx.send(f'{member.mention} has been unmuted.')
@@ -202,25 +282,21 @@ async def _8ball(ctx, *, question):
 
 @bot.command()
 async def roll(ctx, dice: str):
-    """Rolls a dice in NdN format."""
     try:
         rolls, limit = map(int, dice.split('d'))
     except Exception:
         await ctx.send('Format has to be in NdN!')
         return
-
     result = ', '.join(str(random.randint(1, limit)) for r in range(rolls))
     await ctx.send(result)
 
 @bot.command()
 async def coinflip(ctx):
-    """Flips a coin."""
     result = random.choice(['Heads', 'Tails'])
     await ctx.send(f"The coin landed on: {result}")
 
 @bot.command()
 async def rng(ctx, low: int, high: int):
-    """Generates a random number between two numbers."""
     if low >= high:
         await ctx.send("The lower number must be less than the higher number.")
         return
@@ -229,22 +305,17 @@ async def rng(ctx, low: int, high: int):
 
 @bot.command()
 async def poll(ctx, question, *choices: str):
-    """Create a poll for users to vote on."""
     if len(choices) < 2:
         await ctx.send("You must provide at least two choices.")
         return
-
     poll_message = f"**{question}**\n\n" + "\n".join([f"{index+1}. {choice}" for index, choice in enumerate(choices)])
     poll = await ctx.send(poll_message)
-
     for i in range(len(choices)):
         await poll.add_reaction(chr(127462 + i))  # 1️⃣, 2️⃣, 3️⃣, etc.
-
     await ctx.send("Poll created! Please vote by reacting to the poll.")
 
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
-    """Shows info about a user."""
     member = member or ctx.author
     embed = discord.Embed(title=f'{member}', color=member.color)
     embed.set_thumbnail(url=member.avatar.url)
@@ -256,7 +327,6 @@ async def userinfo(ctx, member: discord.Member = None):
 
 @bot.command()
 async def serverinfo(ctx):
-    """Shows info about the server."""
     guild = ctx.guild
     embed = discord.Embed(title=f'{guild.name}', color=discord.Color.blue())
     embed.set_thumbnail(url=guild.icon.url)
@@ -269,16 +339,15 @@ async def serverinfo(ctx):
 
 @bot.command()
 async def leaderboard(ctx):
-    """Displays the leaderboard of users with the most coins."""
-
     sorted_users = sorted(user_data.items(), key=lambda x: x[1].get('coins', 0), reverse=True)
-
     leaderboard_message = "**Leaderboard**\n"
     for idx, (user_id, data) in enumerate(sorted_users[:10], 1):  
-        user = await bot.fetch_user(user_id)
-        coins = data.get('coins', 0)
-        leaderboard_message += f"{idx}. {user.name} - {coins} coins\n"
-
+        try:
+            user = await bot.fetch_user(int(user_id))
+            coins = data.get('coins', 0)
+            leaderboard_message += f"{idx}. {user.name} - {coins} coins\n"
+        except Exception:
+            continue
     if len(sorted_users) == 0:
         await ctx.send("No users found with coin data.")
     else:
@@ -286,7 +355,6 @@ async def leaderboard(ctx):
 
 @bot.command()
 async def balance(ctx):
-    """Shows the user's balance."""
     user_id = str(ctx.author.id)
     coins = user_data.get(user_id, {}).get('coins', 0)
     money = user_data.get(user_id, {}).get('money', 1000)  
@@ -294,11 +362,9 @@ async def balance(ctx):
 
 @bot.command()
 async def buycoin(ctx, amount: int):
-    """Buy coins with money."""
     user_id = str(ctx.author.id)
     money = user_data.get(user_id, {}).get('money', 1000) 
     total_cost = amount * coin_value
-
     if money >= total_cost:
         user_data.setdefault(user_id, {})['money'] = money - total_cost
         user_data.setdefault(user_id, {})['coins'] = user_data.get(user_id, {}).get('coins', 0) + amount
@@ -322,10 +388,16 @@ async def back(ctx):
 
 @bot.event
 async def on_message(message):
-    if message.mentions:
-        for user in message.mentions:
-            if user.id in afk_users:
-                await message.channel.send(f"{user.mention} is AFK: {afk_users[user.id]}")
+    if message.author.bot:
+        return
+    if message.author.id in afk_users:
+        del afk_users[message.author.id]
+        await message.channel.send(f"{message.author.mention} is back!")
+    mentioned_afk = set()
+    for user in message.mentions:
+        if user.id in afk_users and user.id not in mentioned_afk:
+            await message.channel.send(f"{user.mention} is AFK: {afk_users[user.id]}")
+            mentioned_afk.add(user.id)
     await bot.process_commands(message)
 
 @bot.command()
@@ -334,11 +406,9 @@ async def blackjack(ctx):
     if user in blackjack_games:
         await ctx.send("You already have a game in progress!")
         return
-    
     player_hand = [draw_card(), draw_card()]
     dealer_hand = [draw_card()]
     blackjack_games[user] = {'player': player_hand, 'dealer': dealer_hand}
-    
     await ctx.send(f"{ctx.author.mention}, your hand: {player_hand} ({calculate_score(player_hand)}). Dealer's hand: {dealer_hand}")
 
 @bot.command()
@@ -347,10 +417,8 @@ async def hit(ctx):
     if user not in blackjack_games:
         await ctx.send("Start a game first using !blackjack!")
         return
-    
     blackjack_games[user]['player'].append(draw_card())
     score = calculate_score(blackjack_games[user]['player'])
-    
     if score > 21:
         await ctx.send(f"{ctx.author.mention}, you busted! Your hand: {blackjack_games[user]['player']} ({score})")
         del blackjack_games[user]
@@ -363,21 +431,17 @@ async def stand(ctx):
     if user not in blackjack_games:
         await ctx.send("Start a game first using !blackjack!")
         return
-    
     dealer_hand = blackjack_games[user]['dealer']
     while calculate_score(dealer_hand) < 17:
         dealer_hand.append(draw_card())
-    
     player_score = calculate_score(blackjack_games[user]['player'])
     dealer_score = calculate_score(dealer_hand)
-    
     if dealer_score > 21 or player_score > dealer_score:
         result = "You win!"
     elif player_score < dealer_score:
         result = "You lose!"
     else:
         result = "It's a tie!"
-    
     await ctx.send(f"{ctx.author.mention}, your hand: {blackjack_games[user]['player']} ({player_score}). Dealer's hand: {dealer_hand} ({dealer_score}). {result}")
     del blackjack_games[user]
 
@@ -386,7 +450,6 @@ async def slots(ctx, bet: int):
     symbols = ['🍒', '🍋', '🔔', '🍉', '⭐', '7️⃣']
     result = [random.choice(symbols) for _ in range(3)]
     await ctx.send(f"{ctx.author.mention} spun: {' | '.join(result)}")
-    
     if len(set(result)) == 1:
         await ctx.send(f"JACKPOT! You won {bet * 5} coins!")
     elif len(set(result)) == 2:
