@@ -1,6 +1,4 @@
 my discord bot nothing good
-!8ball (question)
-!roll (NdN) (e.g., !roll 2d6)
 !userinfo
 !serverinfo
 !uptime
@@ -14,3 +12,13 @@ my discord bot nothing good
 !blackjack
 !hit or !stand
 !report (user) (reason) 
+!mine
+
+
+staff
+!kick (@user) (reason)
+!ban (@user) (reason)
+!purge  (number)
+!mute (@user) (reason)
+!unmute (@user) (reason)
+!banlist
