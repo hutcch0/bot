@@ -34,7 +34,7 @@ bot = commands.Bot(command_prefix='!', intents=intents, application_id="13063881
 afk_users = {}
 blackjack_games = {}
 
-log_dir = '/home/container/'
+log_dir = './discordbot'
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -76,7 +76,6 @@ async def market_fluctuation():
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
     market_fluctuation.start()
-
     db = get_db()
     cursor = db.cursor()
     cursor.execute("""
@@ -270,50 +269,6 @@ async def unmute(ctx, member: discord.Member, *, reason=None):
     await member.remove_roles(muted_role, reason=reason)
     await ctx.send(f'{member.mention} has been unmuted.')
 
-@bot.command(name='8ball')
-async def _8ball(ctx, *, question):
-    responses = [
-        "It is certain.", "It is decidedly so.", "Without a doubt.", "Yes - definitely.", "You may rely on it.",
-        "As I see it, yes.", "Most likely.", "Outlook good.", "Yes.", "Signs point to yes.",
-        "Reply hazy, try again.", "Ask again later.", "Better not tell you now.", "Cannot predict now.", "Concentrate and ask again.",
-        "Don't count on it.", "My reply is no.", "My sources say no.", "Outlook not so good.", "Very doubtful."
-    ]
-    await ctx.send(f'Question: {question}\nAnswer: {random.choice(responses)}')
-
-@bot.command()
-async def roll(ctx, dice: str):
-    try:
-        rolls, limit = map(int, dice.split('d'))
-    except Exception:
-        await ctx.send('Format has to be in NdN!')
-        return
-    result = ', '.join(str(random.randint(1, limit)) for r in range(rolls))
-    await ctx.send(result)
-
-@bot.command()
-async def coinflip(ctx):
-    result = random.choice(['Heads', 'Tails'])
-    await ctx.send(f"The coin landed on: {result}")
-
-@bot.command()
-async def rng(ctx, low: int, high: int):
-    if low >= high:
-        await ctx.send("The lower number must be less than the higher number.")
-        return
-    result = random.randint(low, high)
-    await ctx.send(f"The random number is: {result}")
-
-@bot.command()
-async def poll(ctx, question, *choices: str):
-    if len(choices) < 2:
-        await ctx.send("You must provide at least two choices.")
-        return
-    poll_message = f"**{question}**\n\n" + "\n".join([f"{index+1}. {choice}" for index, choice in enumerate(choices)])
-    poll = await ctx.send(poll_message)
-    for i in range(len(choices)):
-        await poll.add_reaction(chr(127462 + i))  # 1️⃣, 2️⃣, 3️⃣, etc.
-    await ctx.send("Poll created! Please vote by reacting to the poll.")
-
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -390,14 +345,17 @@ async def back(ctx):
 async def on_message(message):
     if message.author.bot:
         return
+
     if message.author.id in afk_users:
         del afk_users[message.author.id]
         await message.channel.send(f"{message.author.mention} is back!")
+    
     mentioned_afk = set()
     for user in message.mentions:
         if user.id in afk_users and user.id not in mentioned_afk:
             await message.channel.send(f"{user.mention} is AFK: {afk_users[user.id]}")
             mentioned_afk.add(user.id)
+
     await bot.process_commands(message)
 
 @bot.command()
@@ -456,5 +414,61 @@ async def slots(ctx, bet: int):
         await ctx.send(f"Nice! You won {bet * 2} coins!")
     else:
         await ctx.send(f"You lost {bet} coins. Try again!")
+
+# ========== MINES GAME ==========
+@bot.command()
+async def mine(ctx, bet: int, row: int, col: int):
+    """Play the Mines game! Pick a spot in a 3x3 grid and avoid the bomb."""
+    user_id = str(ctx.author.id)
+    coins = user_data.get(user_id, {}).get('coins', 0)
+
+    if bet <= 0:
+        await ctx.send("Bet must be positive.")
+        return
+    if coins < bet:
+        await ctx.send(f"{ctx.author.mention}, you don't have enough coins to bet.")
+        return
+    if not (1 <= row <= 3 and 1 <= col <= 3):
+        await ctx.send("Row and column must be between 1 and 3.")
+        return
+
+    bomb_row = random.randint(1, 3)
+    bomb_col = random.randint(1, 3)
+
+    grid = ""
+    for r in range(1, 4):
+        for c in range(1, 4):
+            if r == row and c == col:
+                grid += "🔲" 
+            else:
+                grid += "⬜"
+        grid += "\n"
+        
+    if (row, col) == (bomb_row, bomb_col):
+        user_data[user_id]['coins'] = coins - bet
+        save_user_data()
+        await ctx.send(f"{ctx.author.mention} picked:\n{grid}\n💣 **BOOM! You hit the bomb and lost {bet} coins!**\nThe bomb was at row {bomb_row}, column {bomb_col}.")
+    else:
+        winnings = bet * 2
+        user_data[user_id]['coins'] = coins + bet
+        save_user_data()
+        await ctx.send(f"{ctx.author.mention} picked:\n{grid}\n🎉 **Safe! You win {bet} coins!**\nThe bomb was at row {bomb_row}, column {bomb_col}.")
+
+# ========== SOCIAL LINKS EMBED ==========
+@bot.command()
+async def social(ctx):
+    """Show social media and other links."""
+    embed = discord.Embed(
+        title="🌐 Social Links",
+        description="Check out our pages and communities!",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(name="Website", value="[my website](https://hutcch.neocities.org/html/Links-Page)", inline=False)
+    embed.add_field(name="YouTube", value="[YouTube Channel](https://www.youtube.com/channel/UCbhfUDBi3YEXRTJGI5EXtQQ)", inline=False)
+    embed.add_field(name="Twitter", value="[Twitter](https://x.com/Hutcch2)", inline=False)
+    embed.add_field(name="Instagram", value="[Instagram](https://www.instagram.com/huttch0/)", inline=False)
+    embed.add_field(name="Discord", value="[Join our Discord](https://discord.gg/dMT8gtc5U8)", inline=False)
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
