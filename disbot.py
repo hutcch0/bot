@@ -90,6 +90,7 @@ async def on_ready():
     cursor.close()
     db.close()
 
+# ========== report reactions ==========
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.channel_id != 1309979922319540305:  
@@ -192,25 +193,67 @@ async def on_member_join(member):
 
 # ========== END GLOBAL BAN SYSTEM ==========
 
+# ========== report ==========
+REPORT_CHANNEL_ID = 1309979922319540305
+
 @bot.command()
 async def report(ctx, member: discord.Member, *, reason: str):
     """Allows users to report someone."""
-    report_channel_id = 1309979922319540305 
-    report_channel = bot.get_channel(report_channel_id)
-
+    report_channel = bot.get_channel(REPORT_CHANNEL_ID)
     if not report_channel:
         await ctx.send("Error: Could not find the report channel.")
         return
 
-    report_message = f"**Report received**\n**Reported User:** {member.mention}\n**Reported by:** {ctx.author.mention}\n**Reason:** {reason}\n**Timestamp:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+    embed = discord.Embed(
+        title="New Report",
+        description=f"**Reported User:** {member.mention}\n**Reported by:** {ctx.author.mention}\n**Reason:** {reason}\n**Timestamp:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+        color=discord.Color.red()
+    )
+    embed.set_footer(text="React with ✅ to claim, ❌ to close.")
 
-    report_msg = await report_channel.send(report_message)
-
-    await report_msg.add_reaction("✅") 
-    await report_msg.add_reaction("❌") 
+    report_msg = await report_channel.send(embed=embed)
+    await report_msg.add_reaction("✅")
+    await report_msg.add_reaction("❌")
 
     await ctx.send(f"Thank you for your report, {ctx.author.mention}. The moderation team will review it shortly.")
 
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.channel_id != REPORT_CHANNEL_ID:
+        return
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        return
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except Exception:
+        return
+    if payload.user_id == bot.user.id:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    if not member or not member.guild_permissions.kick_members:
+        return
+
+    if payload.emoji.name == "✅":
+        embed = message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.title = "Report Claimed"
+        embed.set_footer(text=f"Claimed by {member.display_name}")
+        await message.edit(embed=embed)
+        await channel.send(f"Report claimed by {member.mention}.")
+    elif payload.emoji.name == "❌":
+        embed = message.embeds[0]
+        embed.color = discord.Color.dark_grey()
+        embed.title = "Report Closed"
+        embed.set_footer(text=f"Closed by {member.display_name}")
+        await message.edit(embed=embed)
+        await channel.send(f"Report closed by {member.mention}. Deleting in 5 seconds...")
+        await message.clear_reactions()
+        await asyncio.sleep(5)
+        await message.delete()
+
+# ========== uptime ==========
 @bot.command()
 async def uptime(ctx):
     uptime_duration = datetime.utcnow() - startup_time
@@ -220,6 +263,7 @@ async def uptime(ctx):
     seconds = uptime_duration.seconds % 60
     await ctx.send(f"The bot has been online for {days} days, {hours} hours, {minutes} minutes, and {seconds} seconds.")
 
+# ========== coin stuff ==========
 @bot.command()
 async def coinvalue(ctx):
     await ctx.send(f"The current coin value is {coin_value}.")
@@ -237,12 +281,14 @@ async def sellcoin(ctx, amount: int):
     save_user_data()
     await ctx.send(f"{ctx.author.mention} sold {amount} coins for ${total_value}. You now have {user_data[user_id]['coins']} coins and ${user_data[user_id]['money']}.")
 
+# ========== kill command ==========
 @bot.command()
 @commands.is_owner()  
 async def stop(ctx):
     await ctx.send("Stopping the bot...")
     await bot.close()
 
+# ========== mod commands ==========
 @bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason=None):
@@ -269,6 +315,7 @@ async def unmute(ctx, member: discord.Member, *, reason=None):
     await member.remove_roles(muted_role, reason=reason)
     await ctx.send(f'{member.mention} has been unmuted.')
 
+# ========== info stuff ==========
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -292,6 +339,7 @@ async def serverinfo(ctx):
     embed.add_field(name='Created', value=guild.created_at.strftime('%Y-%m-%d %H:%M:%S'))
     await ctx.send(embed=embed)
 
+# ========== leaderboard ==========
 @bot.command()
 async def leaderboard(ctx):
     sorted_users = sorted(user_data.items(), key=lambda x: x[1].get('coins', 0), reverse=True)
@@ -308,6 +356,7 @@ async def leaderboard(ctx):
     else:
         await ctx.send(leaderboard_message)
 
+# ========== coin stuff ==========
 @bot.command()
 async def balance(ctx):
     user_id = str(ctx.author.id)
@@ -328,6 +377,7 @@ async def buycoin(ctx, amount: int):
     else:
         await ctx.send(f"{ctx.author.mention}, you don't have enough money to buy {amount} coins.")
 
+# ========== afk ==========
 @bot.command()
 async def afk(ctx, *, reason="AFK"): 
     afk_users[ctx.author.id] = reason
@@ -358,6 +408,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+# ========== blackjack ==========
 @bot.command()
 async def blackjack(ctx):
     user = ctx.author.id
@@ -403,6 +454,7 @@ async def stand(ctx):
     await ctx.send(f"{ctx.author.mention}, your hand: {blackjack_games[user]['player']} ({player_score}). Dealer's hand: {dealer_hand} ({dealer_score}). {result}")
     del blackjack_games[user]
 
+# ========== slots ==========
 @bot.command()
 async def slots(ctx, bet: int):
     symbols = ['🍒', '🍋', '🔔', '🍉', '⭐', '7️⃣']
@@ -453,6 +505,23 @@ async def mine(ctx, bet: int, row: int, col: int):
         user_data[user_id]['coins'] = coins + bet
         save_user_data()
         await ctx.send(f"{ctx.author.mention} picked:\n{grid}\n🎉 **Safe! You win {bet} coins!**\nThe bomb was at row {bomb_row}, column {bomb_col}.")
+        
+# ========== photos ==========       
+@bot.command()
+async def photo(ctx):
+    """Sends a random photo from the photo.json file."""
+    try:
+        with open('photo.json', 'r') as f:
+            photos = json.load(f)
+        if not photos:
+            await ctx.send("No photos found!")
+            return
+
+        link = random.choice(list(photos.values()))
+        await ctx.send(link)
+    except Exception as e:
+        await ctx.send("Error loading photos.")
+        print(f"Photo command error: {e}")
 
 # ========== SOCIAL LINKS EMBED ==========
 @bot.command()
