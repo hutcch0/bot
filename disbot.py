@@ -9,9 +9,8 @@ import mysql.connector
 # ========== CONFIGURATION ==========
 TOKEN = '...123'
 
-# MySQL connection info
-MYSQL_HOST = '123...'
-MYSQL_PORT = 2311
+MYSQL_HOST = '123'
+MYSQL_PORT = 123
 MYSQL_USER = '123'
 MYSQL_PASSWORD = '123'
 MYSQL_DB = '123'
@@ -53,6 +52,7 @@ def save_user_data():
     with open(user_data_file, 'w') as f:
         json.dump(user_data, f)
 
+# ========== blackjack ==========
 def draw_card():
     return random.choice(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'])
 
@@ -65,13 +65,22 @@ def calculate_score(cards):
         aces -= 1
     return score
 
+# ========== market ==========
+coin_trend = 0  # -1 for down, 0 for stable, 1 for up
+
 @tasks.loop(minutes=10)
 async def market_fluctuation():
-    global coin_value
-    change = random.randint(-100, 100)  
-    coin_value = max(1, min(coin_value + change, 250)) 
-    print(f"Coin value changed! New value: {coin_value}")
+    global coin_value, coin_trend
+    if random.random() < 0.7:
+        if coin_trend == 0:
+            coin_trend = random.choice([-1, 1])
+    else:
+        coin_trend *= -1 if coin_trend != 0 else random.choice([-1, 1])
+    change = random.randint(5, 15) * coin_trend
+    coin_value = max(1, min(coin_value + change, 250))
+    print(f"Coin value changed! New value: {coin_value} (trend: {coin_trend})")
 
+# ========== on ready ==========
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
@@ -89,34 +98,6 @@ async def on_ready():
     db.commit()
     cursor.close()
     db.close()
-
-# ========== report reactions ==========
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.channel_id != 1309979922319540305:  
-        return
-
-    message = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
-
-    if message.author != bot.user:
-        return
-
-    if payload.user_id == bot.user.id:
-        return 
-
-    member = await bot.get_guild(payload.guild_id).fetch_member(payload.user_id)
-    if not member or not member.guild_permissions.kick_members:
-        return  
-
-    if payload.emoji.name == "✅":
-        await message.channel.send(f"Report claimed by {member.mention}.")
-        await message.edit(content=f"**Report claimed**\n{message.content}") 
-    elif payload.emoji.name == "❌":
-        await message.channel.send(f"Report closed by {member.mention}.")
-        await message.edit(content=f"**Report closed**\n{message.content}") 
-
-    await message.remove_reaction("✅", member)
-    await message.remove_reaction("❌", member)
 
 # ========== GLOBAL BAN SYSTEM ==========
 
@@ -457,15 +438,31 @@ async def stand(ctx):
 # ========== slots ==========
 @bot.command()
 async def slots(ctx, bet: int):
+    user_id = str(ctx.author.id)
+    coins = user_data.get(user_id, {}).get('coins', 0)
+    if bet <= 0:
+        await ctx.send("Bet must be positive.")
+        return
+    if coins < bet:
+        await ctx.send(f"{ctx.author.mention}, you don't have enough coins to bet.")
+        return
+
     symbols = ['🍒', '🍋', '🔔', '🍉', '⭐', '7️⃣']
     result = [random.choice(symbols) for _ in range(3)]
     await ctx.send(f"{ctx.author.mention} spun: {' | '.join(result)}")
+
     if len(set(result)) == 1:
-        await ctx.send(f"JACKPOT! You won {bet * 5} coins!")
+        winnings = bet * 5
+        user_data[user_id]['coins'] = coins + winnings
+        await ctx.send(f"JACKPOT! You won {winnings} coins!")
     elif len(set(result)) == 2:
-        await ctx.send(f"Nice! You won {bet * 2} coins!")
+        winnings = bet * 2
+        user_data[user_id]['coins'] = coins + winnings
+        await ctx.send(f"Nice! You won {winnings} coins!")
     else:
+        user_data[user_id]['coins'] = coins - bet
         await ctx.send(f"You lost {bet} coins. Try again!")
+    save_user_data()
 
 # ========== MINES GAME ==========
 @bot.command()
@@ -518,10 +515,25 @@ async def photo(ctx):
             return
 
         link = random.choice(list(photos.values()))
-        await ctx.send(link)
+        embed = discord.Embed(title="Random Photo")
+        embed.set_image(url=link)
+        await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send("Error loading photos.")
         print(f"Photo command error: {e}")
+
+# ========== error handler ==========     
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Missing arguments for this command.")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("You don't have permission to use this command.")
+    elif isinstance(error, commands.CommandNotFound):
+        pass  # Ignore unknown commands
+    else:
+        await ctx.send("An error occurred.")
+        print(f"Error: {error}")
 
 # ========== SOCIAL LINKS EMBED ==========
 @bot.command()
