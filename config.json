@@ -1,0 +1,8 @@
+{
+    "TOKEN": "your_discord_token_here",
+    "MYSQL_HOST": "your_mysql_host_here",
+    "MYSQL_PORT": 1111,
+    "MYSQL_USER": "your_mysql_user_here",
+    "MYSQL_PASSWORD": "your_mysql_password_here",
+    "MYSQL_DB": "your_mysql_db_here"
+}
