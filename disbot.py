@@ -5,15 +5,18 @@ import os
 from datetime import datetime
 import json
 import mysql.connector
+import asyncio
 
-# ========== CONFIGURATION ==========
-TOKEN = '...123'
+# ========== LOAD CONFIG ==========
+with open('config.json', 'r') as f:
+    config = json.load(f)
 
-MYSQL_HOST = '123'
-MYSQL_PORT = 123
-MYSQL_USER = '123'
-MYSQL_PASSWORD = '123'
-MYSQL_DB = '123'
+TOKEN = config["TOKEN"]
+MYSQL_HOST = config["MYSQL_HOST"]
+MYSQL_PORT = config["MYSQL_PORT"]
+MYSQL_USER = config["MYSQL_USER"]
+MYSQL_PASSWORD = config["MYSQL_PASSWORD"]
+MYSQL_DB = config["MYSQL_DB"]
 
 def get_db():
     return mysql.connector.connect(
