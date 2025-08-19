@@ -20,8 +20,8 @@ Supports global bans (cross-server), AFK system, blackjack, slots, a mines game,
 
 ## Commands
 
-| Command           | Description                                                                 |
-|-------------------|-----------------------------------------------------------------------------|
+| Command           | Description                                                                  |
+|-------------------|------------------------------------------------------------------------------|
 | `!ban @user [reason]`      | Globally ban a user (cross-server, staff only)                      |
 | `!unban @user`             | Globally unban a user (staff only)                                  |
 | `!banlist`                 | Show the global ban list (staff only)                               |
@@ -47,6 +47,10 @@ Supports global bans (cross-server), AFK system, blackjack, slots, a mines game,
 | `!uptime`                  | Show how long the bot has been online                               |
 | `!social`                  | Show social/community links                                         |
 | `!photo`                   | Send a random photo from a JSON file                                |
+| `!work`                    | work for money.                                                     |
+| `!lottery`                 | Show the current lottery status.                                    |
+| `!lottery buy <amount>`    | Buy lottery tickets (more tickets = better odds)                    |
+| `!lottery my`              | Show how many tickets you have in the current lottery.              |
 | `!stop`                    | Stop the bot (bot owner only)                                       |
 
 ---
