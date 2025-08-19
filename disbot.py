@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 import random
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import mysql.connector
 import asyncio
@@ -28,8 +28,8 @@ def get_db():
     )
 
 intents = discord.Intents.default()
-intents.members = True  
-intents.message_content = True  
+intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents, application_id="1306388199387697265")
 
@@ -55,6 +55,18 @@ def save_user_data():
     with open(user_data_file, 'w') as f:
         json.dump(user_data, f)
 
+# ========== work ==========        
+work_cooldowns_file = 'work_cooldowns.json'
+if os.path.exists(work_cooldowns_file):
+    with open(work_cooldowns_file, 'r') as f:
+        work_cooldowns = json.load(f)
+else:
+    work_cooldowns = {}
+
+def save_work_cooldowns():
+    with open(work_cooldowns_file, 'w') as f:
+        json.dump(work_cooldowns, f)        
+        
 # ========== blackjack ==========
 def draw_card():
     return random.choice(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'])
@@ -69,7 +81,7 @@ def calculate_score(cards):
     return score
 
 # ========== market ==========
-coin_trend = 0  # -1 for down, 0 for stable, 1 for up
+coin_trend = 0 
 
 @tasks.loop(minutes=10)
 async def market_fluctuation():
@@ -82,12 +94,119 @@ async def market_fluctuation():
     change = random.randint(5, 15) * coin_trend
     coin_value = max(1, min(coin_value + change, 250))
     print(f"Coin value changed! New value: {coin_value} (trend: {coin_trend})")
+    
+# ========== work ==========    
+@bot.command()
+async def work(ctx):
+    """Work once a day to earn money."""
+    user_id = str(ctx.author.id)
+    now = datetime.utcnow()
+    last_work_time = work_cooldowns.get(user_id)
+    if last_work_time:
+        last_time = datetime.fromisoformat(last_work_time)
+        if (now - last_time) < timedelta(hours=24):
+            time_left = timedelta(hours=24) - (now - last_time)
+            hours, remainder = divmod(time_left.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            await ctx.send(f"{ctx.author.mention}, you need to wait {time_left.days}d {hours}h {minutes}m before working again.")
+            return
+
+    amount = random.randint(30, 200)
+    user_data.setdefault(user_id, {})
+    user_data[user_id]['money'] = user_data[user_id].get('money', 1000) + amount
+    save_user_data()
+    work_cooldowns[user_id] = now.isoformat()
+    save_work_cooldowns()
+    await ctx.send(f"{ctx.author.mention}, you worked hard and earned ${amount}!")
+
+# ========== LOTTERY SYSTEM ==========
+lottery_tickets = {}
+lottery_pot = 0
+lottery_ticket_price = 100
+lottery_last_draw = datetime.utcnow()
+
+@bot.group(invoke_without_command=True)
+async def lottery(ctx):
+    """Check the current lottery status."""
+    total_tickets = sum(lottery_tickets.values())
+    if total_tickets == 0:
+        await ctx.send("No tickets have been bought yet for this round.")
+        return
+    time_left = timedelta(hours=24) - (datetime.utcnow() - lottery_last_draw)
+    msg = f"🎟️ **Lottery** 🎟️\n" \
+          f"Ticket price: {lottery_ticket_price} coins\n" \
+          f"Total tickets: {total_tickets}\n" \
+          f"Current pot: {lottery_pot} coins\n" \
+          f"Time left: {str(time_left).split('.')[0]}"
+    await ctx.send(msg)
+
+@lottery.command()
+async def buy(ctx, amount: int = 1):
+    """Buy lottery tickets."""
+    global lottery_pot
+    user_id = str(ctx.author.id)
+    coins = user_data.get(user_id, {}).get('coins', 0)
+    if amount <= 0:
+        await ctx.send("You must buy at least 1 ticket.")
+        return
+    cost = amount * lottery_ticket_price
+    if coins < cost:
+        await ctx.send(f"{ctx.author.mention}, you don't have enough coins to buy {amount} tickets.")
+        return
+    user_data[user_id]['coins'] = coins - cost
+    lottery_tickets[user_id] = lottery_tickets.get(user_id, 0) + amount
+    lottery_pot += cost
+    save_user_data()
+    await ctx.send(f"{ctx.author.mention} bought {amount} ticket(s)! Good luck!")
+
+@lottery.command()
+async def my(ctx):
+    """Show how many tickets you have this round."""
+    user_id = str(ctx.author.id)
+    tickets = lottery_tickets.get(user_id, 0)
+    await ctx.send(f"{ctx.author.mention}, you have {tickets} ticket(s) in the current lottery.")
+
+@tasks.loop(minutes=1)
+async def lottery_draw_task():
+    global lottery_tickets, lottery_pot, lottery_last_draw
+    if (datetime.utcnow() - lottery_last_draw) >= timedelta(hours=24):
+        total_tickets = sum(lottery_tickets.values())
+        if total_tickets == 0:
+            lottery_last_draw = datetime.utcnow()
+            return
+        entries = []
+        for user_id, tickets in lottery_tickets.items():
+            entries.extend([user_id] * tickets)
+        winner_id = random.choice(entries)
+        user_data.setdefault(winner_id, {})
+        user_data[winner_id]['coins'] = user_data[winner_id].get('coins', 0) + lottery_pot
+        save_user_data()
+        channel = None
+        for guild in bot.guilds:
+            for c in guild.text_channels:
+                if "general" in c.name:
+                    channel = c
+                    break
+            if channel:
+                break
+        if not channel and bot.guilds:
+            channel = bot.guilds[0].text_channels[0]
+        if channel:
+            winner = await bot.fetch_user(int(winner_id))
+            await channel.send(f"🎉 **Lottery Draw!** 🎉\n"
+                               f"Winner: {winner.mention}\n"
+                               f"Prize: {lottery_pot} coins\n"
+                               f"Congratulations!")
+        lottery_tickets = {}
+        lottery_pot = 0
+        lottery_last_draw = datetime.utcnow()
 
 # ========== on ready ==========
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
     market_fluctuation.start()
+    lottery_draw_task.start()
     db = get_db()
     cursor = db.cursor()
     cursor.execute("""
@@ -107,7 +226,6 @@ async def on_ready():
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, user: discord.User, *, reason="No reason provided"):
-    """Globally ban a user and add to the global ban database."""
     db = get_db()
     cursor = db.cursor()
     cursor.execute(
@@ -130,7 +248,6 @@ async def ban(ctx, user: discord.User, *, reason="No reason provided"):
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def unban(ctx, user: discord.User):
-    """Globally unban a user and remove from the global ban database."""
     db = get_db()
     cursor = db.cursor()
     cursor.execute("DELETE FROM bans WHERE user_id = %s", (user.id,))
@@ -147,7 +264,6 @@ async def unban(ctx, user: discord.User):
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def banlist(ctx):
-    """Show the global ban list."""
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT user_id, reason FROM bans")
@@ -182,7 +298,6 @@ REPORT_CHANNEL_ID = 1309979922319540305
 
 @bot.command()
 async def report(ctx, member: discord.Member, *, reason: str):
-    """Allows users to report someone."""
     report_channel = bot.get_channel(REPORT_CHANNEL_ID)
     if not report_channel:
         await ctx.send("Error: Could not find the report channel.")
@@ -267,7 +382,7 @@ async def sellcoin(ctx, amount: int):
 
 # ========== kill command ==========
 @bot.command()
-@commands.is_owner()  
+@commands.is_owner()
 async def stop(ctx):
     await ctx.send("Stopping the bot...")
     await bot.close()
@@ -282,7 +397,7 @@ async def kick(ctx, member: discord.Member, *, reason=None):
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, limit: int):
-    await ctx.channel.purge(limit=limit + 1)  
+    await ctx.channel.purge(limit=limit + 1)
     await ctx.send(f'Deleted {limit} messages.', delete_after=5)
 
 @bot.command()
@@ -328,7 +443,7 @@ async def serverinfo(ctx):
 async def leaderboard(ctx):
     sorted_users = sorted(user_data.items(), key=lambda x: x[1].get('coins', 0), reverse=True)
     leaderboard_message = "**Leaderboard**\n"
-    for idx, (user_id, data) in enumerate(sorted_users[:10], 1):  
+    for idx, (user_id, data) in enumerate(sorted_users[:10], 1):
         try:
             user = await bot.fetch_user(int(user_id))
             coins = data.get('coins', 0)
@@ -345,13 +460,13 @@ async def leaderboard(ctx):
 async def balance(ctx):
     user_id = str(ctx.author.id)
     coins = user_data.get(user_id, {}).get('coins', 0)
-    money = user_data.get(user_id, {}).get('money', 1000)  
+    money = user_data.get(user_id, {}).get('money', 1000)
     await ctx.send(f"{ctx.author.mention}, you have {coins} coins and ${money}.")
 
 @bot.command()
 async def buycoin(ctx, amount: int):
     user_id = str(ctx.author.id)
-    money = user_data.get(user_id, {}).get('money', 1000) 
+    money = user_data.get(user_id, {}).get('money', 1000)
     total_cost = amount * coin_value
     if money >= total_cost:
         user_data.setdefault(user_id, {})['money'] = money - total_cost
@@ -363,7 +478,7 @@ async def buycoin(ctx, amount: int):
 
 # ========== afk ==========
 @bot.command()
-async def afk(ctx, *, reason="AFK"): 
+async def afk(ctx, *, reason="AFK"):
     afk_users[ctx.author.id] = reason
     await ctx.send(f"{ctx.author.mention} is now AFK: {reason}")
 
@@ -383,7 +498,7 @@ async def on_message(message):
     if message.author.id in afk_users:
         del afk_users[message.author.id]
         await message.channel.send(f"{message.author.mention} is back!")
-    
+
     mentioned_afk = set()
     for user in message.mentions:
         if user.id in afk_users and user.id not in mentioned_afk:
@@ -470,7 +585,6 @@ async def slots(ctx, bet: int):
 # ========== MINES GAME ==========
 @bot.command()
 async def mine(ctx, bet: int, row: int, col: int):
-    """Play the Mines game! Pick a spot in a 3x3 grid and avoid the bomb."""
     user_id = str(ctx.author.id)
     coins = user_data.get(user_id, {}).get('coins', 0)
 
@@ -491,11 +605,11 @@ async def mine(ctx, bet: int, row: int, col: int):
     for r in range(1, 4):
         for c in range(1, 4):
             if r == row and c == col:
-                grid += "🔲" 
+                grid += "🔲"
             else:
                 grid += "⬜"
         grid += "\n"
-        
+
     if (row, col) == (bomb_row, bomb_col):
         user_data[user_id]['coins'] = coins - bet
         save_user_data()
@@ -505,11 +619,10 @@ async def mine(ctx, bet: int, row: int, col: int):
         user_data[user_id]['coins'] = coins + bet
         save_user_data()
         await ctx.send(f"{ctx.author.mention} picked:\n{grid}\n🎉 **Safe! You win {bet} coins!**\nThe bomb was at row {bomb_row}, column {bomb_col}.")
-        
-# ========== photos ==========       
+
+# ========== photos ==========
 @bot.command()
 async def photo(ctx):
-    """Sends a random photo from the photo.json file."""
     try:
         with open('photo.json', 'r') as f:
             photos = json.load(f)
@@ -525,7 +638,7 @@ async def photo(ctx):
         await ctx.send("Error loading photos.")
         print(f"Photo command error: {e}")
 
-# ========== error handler ==========     
+# ========== error handler ==========
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
@@ -533,7 +646,7 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("You don't have permission to use this command.")
     elif isinstance(error, commands.CommandNotFound):
-        pass  # Ignore unknown commands
+        pass 
     else:
         await ctx.send("An error occurred.")
         print(f"Error: {error}")
@@ -541,13 +654,11 @@ async def on_command_error(ctx, error):
 # ========== SOCIAL LINKS EMBED ==========
 @bot.command()
 async def social(ctx):
-    """Show social media and other links."""
     embed = discord.Embed(
         title="🌐 Social Links",
         description="Check out our pages and communities!",
         color=discord.Color.blue()
     )
-    
     embed.add_field(name="Website", value="[my website](https://hutcch.neocities.org/html/Links-Page)", inline=False)
     embed.add_field(name="YouTube", value="[YouTube Channel](https://www.youtube.com/channel/UCbhfUDBi3YEXRTJGI5EXtQQ)", inline=False)
     embed.add_field(name="Twitter", value="[Twitter](https://x.com/Hutcch2)", inline=False)
