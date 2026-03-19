@@ -51,6 +51,7 @@ Supports global bans (cross-server), AFK system, blackjack, slots, a mines game,
 | `!lottery`                 | Show the current lottery status.                                    |
 | `!lottery buy <amount>`    | Buy lottery tickets (more tickets = better odds)                    |
 | `!lottery my`              | Show how many tickets you have in the current lottery.              |
+| `!xp`                      | Show Leveling Progress                                              |
 | `!stop`                    | Stop the bot (bot owner only)                                       |
 
 ---
