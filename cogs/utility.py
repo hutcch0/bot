@@ -10,6 +10,7 @@ with open('config.json', 'r') as f:
 class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.recent_afk_triggers = {}
 
     @commands.command()
     async def uptime(self, ctx):
@@ -40,6 +41,8 @@ class Utility(commands.Cog):
                     timestamp = VALUES(timestamp)
             """, (ctx.author.id, reason, datetime.now(timezone.utc)))
             conn.commit()
+            
+            self.recent_afk_triggers[ctx.author.id] = datetime.now(timezone.utc)
 
             embed = discord.Embed(
                 description=f" {ctx.author.mention} is now AFK: {reason}",
@@ -61,25 +64,23 @@ class Utility(commands.Cog):
         if message.author.bot:
             return
 
+        if message.author.id in self.recent_afk_triggers:
+            elapsed = (datetime.now(timezone.utc) - self.recent_afk_triggers[message.author.id]).total_seconds()
+            if elapsed < 5:
+                return
+
         conn = None
         cursor = None
         try:
             conn = self.bot.db_pool.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT reason FROM afk_users WHERE user_id = %s",
-                (message.author.id,)
-            )
+            cursor.execute("SELECT reason FROM afk_users WHERE user_id = %s", (message.author.id,))
             if cursor.fetchone():
-                cursor.execute(
-                    "DELETE FROM afk_users WHERE user_id = %s",
-                    (message.author.id,)
-                )
+                cursor.execute("DELETE FROM afk_users WHERE user_id = %s", (message.author.id,))
                 conn.commit()
                 await message.channel.send(
-                    f" Welcome back {message.author.mention}! "
-                    f"AFK status removed.",
+                    f"✅ Welcome back {message.author.mention}! AFK status removed.",
                     delete_after=5
                 )
 
