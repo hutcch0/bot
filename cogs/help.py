@@ -179,6 +179,16 @@ class Help(commands.Cog):
                 value="Buy lottery tickets - more tickets means better odds",
                 inline=False
             )
+            embed.add_field(
+                name="`!daily`",
+                value="Claim your daily reward (money, coins, and XP)",
+                inline=False
+            )
+            embed.add_field(
+                name="`!pay @user <amount>`",
+                value="Send money to another user",
+                inline=False
+            )
             embed.set_footer(text="💡 Coin value changes every 10 minutes!")
 
         elif category in ['games', 'game']:
