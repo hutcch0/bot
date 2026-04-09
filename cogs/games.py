@@ -62,6 +62,7 @@ class Games(commands.Cog):
         return embed
 
     @commands.command()
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def blackjack(self, ctx, bet: int = 0):
         """Start a game of blackjack. Optionally bet coins."""
         if ctx.author.id in self.blackjack_games:
@@ -246,6 +247,7 @@ class Games(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def slots(self, ctx, bet: int):
         """Spin the slots. Bet coins to win big."""
         if bet <= 0:
@@ -325,6 +327,7 @@ class Games(commands.Cog):
             await ctx.send("❌ Bet must be a whole number.")
 
     @commands.command()
+    @commands.cooldown(1, 3, commands.BucketType.user)
     async def mine(self, ctx, bet: int, row: int, col: int):
         """Pick a cell on a 3x3 grid. Avoid the bombs!"""
         if bet <= 0:
