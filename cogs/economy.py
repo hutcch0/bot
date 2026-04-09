@@ -535,6 +535,100 @@ class Economy(commands.Cog):
                 cursor.close()
             if conn:
                 conn.close()
+                
+    @commands.command()
+    @commands.cooldown(1, 86400, commands.BucketType.user)
+    async def daily(self, ctx):
+        """Claim your daily reward."""
+        reward_money = random.randint(150, 400)
+        reward_coins = random.randint(8, 25)
+
+        conn = None
+        cursor = None
+        try:
+            conn = self.bot.db_pool.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO users (user_id, money, coins)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    money = money + %s,
+                    coins = coins + %s
+            """, (ctx.author.id, reward_money, reward_coins, reward_money, reward_coins))
+            conn.commit()
+
+            embed = discord.Embed(
+                title="🎁 Daily Reward Claimed!",
+                description=f"You received **${reward_money:,}** and **{reward_coins}** coins!",
+                color=discord.Color.gold()
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send("❌ Failed to claim daily reward.")
+            print(f"Daily error: {e}")
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
+
+    @daily.error
+    async def daily_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            hours = int(error.retry_after // 3600)
+            minutes = int((error.retry_after % 3600) // 60)
+            await ctx.send(f"⏳ You've already claimed your daily reward today.\n"
+                          f"Come back in **{hours}h {minutes}m**.")
+
+    @commands.command()
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def pay(self, ctx, member: discord.Member, amount: int):
+        """Pay another user some money."""
+        if member.id == ctx.author.id:
+            return await ctx.send("❌ You cannot pay yourself.")
+        if amount <= 0:
+            return await ctx.send("❌ Amount must be greater than 0.")
+        if amount > 100000:
+            return await ctx.send("❌ Maximum transfer is $100,000.")
+
+        conn = None
+        cursor = None
+        try:
+            conn = self.bot.db_pool.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE users SET money = money - %s
+                WHERE user_id = %s AND money >= %s
+            """, (amount, ctx.author.id, amount))
+
+            if cursor.rowcount == 0:
+                await ctx.send("❌ You don't have enough money!")
+                return
+
+            cursor.execute("""
+                INSERT INTO users (user_id, money)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE money = money + %s
+            """, (member.id, amount, amount))
+
+            conn.commit()
+
+            embed = discord.Embed(
+                title="💸 Money Transferred",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="From", value=ctx.author.mention, inline=True)
+            embed.add_field(name="To", value=member.mention, inline=True)
+            embed.add_field(name="Amount", value=f"${amount:,}", inline=False)
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            if conn: conn.rollback()
+            await ctx.send("❌ Transfer failed.")
+            print(f"Pay error: {e}")
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
 
 
 async def setup(bot):
