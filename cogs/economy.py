@@ -251,6 +251,7 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
+    @commands.cooldown(1, 3, commands.BucketType.user)
     async def buycoin(self, ctx, amount: int):
         """Buy coins with your cash."""
         if amount <= 0:
@@ -300,6 +301,7 @@ class Economy(commands.Cog):
             await ctx.send("❌ Amount must be a whole number.")
 
     @commands.command()
+    @commands.cooldown(1, 3, commands.BucketType.user)
     async def sellcoin(self, ctx, amount: int):
         """Sell coins for cash."""
         if amount <= 0:
