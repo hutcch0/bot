@@ -5,4 +5,5 @@
     "MYSQL_USER": "your_mysql_user_here",
     "MYSQL_PASSWORD": "your_mysql_password_here",
     "MYSQL_DB": "your_mysql_db_here"
+    "REPORT_CHANNEL_ID": 222
 }
