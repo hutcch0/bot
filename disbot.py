@@ -277,6 +277,16 @@ async def cogs(ctx):
         await ctx.send(f"**Loaded Cogs:**\n{cog_list}")
     else:
         await ctx.send("⚠️ No cogs are currently loaded.")
+        
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    """Syncs slash commands to Discord."""
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"✅ Synced {len(synced)} slash commands!")
+    except Exception as e:
+        await ctx.send(f"❌ Sync failed: {e}")
 
 @bot.command()
 @commands.is_owner()
