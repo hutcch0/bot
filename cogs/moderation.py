@@ -2,10 +2,11 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone, timedelta
-import json
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+from utils.checks import is_bot_owner, has_guild_permissions, is_in_guild
+from config_loader import load_config
+
+config = load_config()
 
 
 class Moderation(commands.Cog):
@@ -22,7 +23,6 @@ class Moderation(commands.Cog):
         guild: discord.Guild = None,
         color=discord.Color.red()
     ):
-        """Sends a log message to the mod log channel."""
         try:
             log_channel_id = config.get("MOD_LOG_CHANNEL_ID")
             if not log_channel_id:
@@ -72,7 +72,6 @@ class Moderation(commands.Cog):
         actor: discord.Member,
         target: discord.Member
     ) -> bool:
-        """Returns True if actor outranks target or is server owner."""
         if actor.id == actor.guild.owner_id:
             return True
         return actor.top_role > target.top_role
@@ -103,7 +102,6 @@ class Moderation(commands.Cog):
                     pass
 
                 await member.ban(reason=f"Global Ban: {row[0]}")
-                print(f"🚫 Auto-banned {member} in {member.guild.name}")
 
                 await self.send_mod_log(
                     action="Auto-Ban (Global)",
@@ -120,11 +118,10 @@ class Moderation(commands.Cog):
                 cursor.close()
             if conn:
                 conn.close()
-
+                
     @commands.command()
     @commands.is_owner()
     async def globalban(self, ctx, user: discord.User, *, reason="No reason provided"):
-        """Globally bans a user from all servers."""
         embed = await self._execute_globalban(user, reason, ctx.author)
         if embed:
             await ctx.send(embed=embed)
@@ -140,24 +137,18 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="globalban", description="Globally bans a user from all servers.")
     @app_commands.describe(
-        user="The user ID to globally ban.",
+        user="The user to globally ban.",
         reason="The reason for the global ban."
     )
     @app_commands.default_permissions(administrator=True)
+    @is_bot_owner()
     async def globalban_slash(
         self,
         interaction: discord.Interaction,
         user: discord.User,
         reason: str = "No reason provided"
     ):
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(
-                "❌ Only the bot owner can use this command.",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         embed = await self._execute_globalban(user, reason, interaction.user)
         if embed:
             await interaction.followup.send(embed=embed)
@@ -171,17 +162,17 @@ class Moderation(commands.Cog):
                 color=discord.Color.red()
             )
 
-    async def _execute_globalban(
-        self,
-        user: discord.User,
-        reason: str,
-        moderator: discord.Member | discord.User
-    ):
-        """Helper that performs the global ban logic."""
+    async def _execute_globalban(self, user, reason, moderator):
         if user.id == self.bot.owner_id:
-            return None
+            return discord.Embed(
+                description="❌ You cannot globally ban the bot owner.",
+                color=discord.Color.red()
+            )
         if user.id == self.bot.user.id:
-            return None
+            return discord.Embed(
+                description="❌ I cannot ban myself.",
+                color=discord.Color.red()
+            )
 
         conn = None
         cursor = None
@@ -221,16 +212,11 @@ class Moderation(commands.Cog):
 
             for guild in self.bot.guilds:
                 try:
-                    await guild.ban(
-                        user,
-                        reason=f"Global Ban by {moderator}: {reason}"
-                    )
+                    await guild.ban(user, reason=f"Global Ban by {moderator}: {reason}")
                     banned_from += 1
                 except discord.Forbidden:
-                    print(f"No permission to ban in {guild.name}")
                     failed_in += 1
-                except discord.HTTPException as e:
-                    print(f"HTTP error banning in {guild.name}: {e}")
+                except discord.HTTPException:
                     failed_in += 1
 
             embed = discord.Embed(
@@ -238,11 +224,7 @@ class Moderation(commands.Cog):
                 color=discord.Color.red(),
                 timestamp=datetime.now(timezone.utc)
             )
-            embed.add_field(
-                name="👤 User",
-                value=f"{user.mention} (`{user.id}`)",
-                inline=False
-            )
+            embed.add_field(name="👤 User", value=f"{user.mention} (`{user.id}`)", inline=False)
             embed.add_field(name="📝 Reason", value=reason, inline=False)
             embed.add_field(
                 name="📊 Results",
@@ -269,7 +251,6 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def globalunban(self, ctx, user: discord.User, *, reason="No reason provided"):
-        """Globally unbans a user from all servers."""
         embed = await self._execute_globalunban(user, reason, ctx.author)
         if embed:
             await ctx.send(embed=embed)
@@ -283,26 +264,20 @@ class Moderation(commands.Cog):
                 color=discord.Color.green()
             )
 
-    @app_commands.command(name="globalunban", description="Globally unbans a user from all servers.")
+    @app_commands.command(name="globalunban", description="Globally unbans a user.")
     @app_commands.describe(
         user="The user to globally unban.",
         reason="The reason for the global unban."
     )
     @app_commands.default_permissions(administrator=True)
+    @is_bot_owner()
     async def globalunban_slash(
         self,
         interaction: discord.Interaction,
         user: discord.User,
         reason: str = "No reason provided"
     ):
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(
-                "❌ Only the bot owner can use this command.",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         embed = await self._execute_globalunban(user, reason, interaction.user)
         if embed:
             await interaction.followup.send(embed=embed)
@@ -316,33 +291,21 @@ class Moderation(commands.Cog):
                 color=discord.Color.green()
             )
 
-    async def _execute_globalunban(
-        self,
-        user: discord.User,
-        reason: str,
-        moderator: discord.Member | discord.User
-    ):
-        """Helper that performs the global unban logic."""
+    async def _execute_globalunban(self, user, reason, moderator):
         conn = None
         cursor = None
         try:
             conn = self.bot.db_pool.get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT user_id FROM bans WHERE user_id = %s",
-                (user.id,)
-            )
+            cursor.execute("SELECT user_id FROM bans WHERE user_id = %s", (user.id,))
             if not cursor.fetchone():
                 return discord.Embed(
                     description=f"⚠️ `{user.name}` is not globally banned.",
                     color=discord.Color.yellow()
                 )
 
-            cursor.execute(
-                "DELETE FROM bans WHERE user_id = %s",
-                (user.id,)
-            )
+            cursor.execute("DELETE FROM bans WHERE user_id = %s", (user.id,))
             conn.commit()
 
             unbanned_from = 0
@@ -350,18 +313,13 @@ class Moderation(commands.Cog):
 
             for guild in self.bot.guilds:
                 try:
-                    await guild.unban(
-                        user,
-                        reason=f"Global Unban by {moderator}: {reason}"
-                    )
+                    await guild.unban(user, reason=f"Global Unban by {moderator}: {reason}")
                     unbanned_from += 1
                 except discord.NotFound:
                     pass
                 except discord.Forbidden:
-                    print(f"No permission to unban in {guild.name}")
                     failed_in += 1
-                except discord.HTTPException as e:
-                    print(f"HTTP error unbanning in {guild.name}: {e}")
+                except discord.HTTPException:
                     failed_in += 1
 
             embed = discord.Embed(
@@ -369,11 +327,7 @@ class Moderation(commands.Cog):
                 color=discord.Color.green(),
                 timestamp=datetime.now(timezone.utc)
             )
-            embed.add_field(
-                name="👤 User",
-                value=f"{user.mention} (`{user.id}`)",
-                inline=False
-            )
+            embed.add_field(name="👤 User", value=f"{user.mention} (`{user.id}`)", inline=False)
             embed.add_field(name="📝 Reason", value=reason, inline=False)
             embed.add_field(
                 name="📊 Results",
@@ -400,25 +354,17 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def bans(self, ctx):
-        """Lists all globally banned users."""
         embed = await self._fetch_bans_embed()
         await ctx.send(embed=embed)
 
     @app_commands.command(name="bans", description="Lists all globally banned users.")
     @app_commands.default_permissions(administrator=True)
+    @is_bot_owner()
     async def bans_slash(self, interaction: discord.Interaction):
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(
-                "❌ Only the bot owner can use this command.",
-                ephemeral=True
-            )
-            return
-
         embed = await self._fetch_bans_embed()
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def _fetch_bans_embed(self):
-        """Helper to build the global ban list embed."""
         conn = None
         cursor = None
         try:
@@ -437,10 +383,7 @@ class Moderation(commands.Cog):
 
             description = ""
             for user_id, reason, timestamp in rows:
-                description += (
-                    f"<@{user_id}> (`{user_id}`)\n"
-                    f"📝 {reason}\n\n"
-                )
+                description += f"<@{user_id}> (`{user_id}`)\n📝 {reason}\n\n"
 
             return discord.Embed(
                 title=f"🚫 Global Bans ({len(rows)})",
@@ -449,7 +392,6 @@ class Moderation(commands.Cog):
             )
 
         except Exception as e:
-            print(f"Bans fetch error: {e}")
             return discord.Embed(
                 description=f"❌ Failed to fetch ban list: {e}",
                 color=discord.Color.red()
@@ -463,7 +405,6 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(kick_members=True)
     async def kick(self, ctx, member: discord.Member, *, reason="No reason provided"):
-        """Kicks a member from the server."""
         if member.id == ctx.author.id:
             await ctx.send("❌ You cannot kick yourself.")
             return
@@ -496,6 +437,8 @@ class Moderation(commands.Cog):
         reason="The reason for the kick."
     )
     @app_commands.default_permissions(kick_members=True)
+    @has_guild_permissions(kick_members=True)
+    @is_in_guild()
     async def kick_slash(
         self,
         interaction: discord.Interaction,
@@ -528,13 +471,7 @@ class Moderation(commands.Cog):
             color=discord.Color.orange()
         )
 
-    async def _execute_kick(
-        self,
-        member: discord.Member,
-        reason: str,
-        moderator: discord.Member | discord.User
-    ):
-        """Helper that performs the kick logic."""
+    async def _execute_kick(self, member, reason, moderator):
         try:
             await member.send(
                 f"👢 You have been kicked from **{member.guild.name}**.\n"
@@ -550,11 +487,7 @@ class Moderation(commands.Cog):
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc)
         )
-        embed.add_field(
-            name="👤 Member",
-            value=f"{member.mention} (`{member.id}`)",
-            inline=False
-        )
+        embed.add_field(name="👤 Member", value=f"{member.mention} (`{member.id}`)", inline=False)
         embed.add_field(name="📝 Reason", value=reason, inline=False)
         embed.set_footer(text=f"Kicked by {moderator}")
         return embed
@@ -562,7 +495,6 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(moderate_members=True)
     async def timeout(self, ctx, member: discord.Member, minutes: int, *, reason="No reason provided"):
-        """Times out a member for a given number of minutes."""
         if member.id == ctx.author.id:
             await ctx.send("❌ You cannot timeout yourself.")
             return
@@ -594,13 +526,15 @@ class Moderation(commands.Cog):
         elif isinstance(error, commands.BadArgument):
             await ctx.send("❌ Usage: `!timeout @user <minutes> [reason]`")
 
-    @app_commands.command(name="timeout", description="Times out a member for a set number of minutes.")
+    @app_commands.command(name="timeout", description="Times out a member.")
     @app_commands.describe(
         member="The member to timeout.",
-        minutes="Duration of the timeout in minutes (1–40320).",
+        minutes="Duration in minutes (1–40320).",
         reason="The reason for the timeout."
     )
     @app_commands.default_permissions(moderate_members=True)
+    @has_guild_permissions(moderate_members=True)
+    @is_in_guild()
     async def timeout_slash(
         self,
         interaction: discord.Interaction,
@@ -640,14 +574,7 @@ class Moderation(commands.Cog):
             color=discord.Color.orange()
         )
 
-    async def _execute_timeout(
-        self,
-        member: discord.Member,
-        minutes: int,
-        reason: str,
-        moderator: discord.Member | discord.User
-    ):
-        """Helper that performs the timeout logic."""
+    async def _execute_timeout(self, member, minutes, reason, moderator):
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await member.timeout(until, reason=f"Timed out by {moderator}: {reason}")
 
@@ -656,11 +583,7 @@ class Moderation(commands.Cog):
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc)
         )
-        embed.add_field(
-            name="👤 Member",
-            value=f"{member.mention} (`{member.id}`)",
-            inline=False
-        )
+        embed.add_field(name="👤 Member", value=f"{member.mention} (`{member.id}`)", inline=False)
         embed.add_field(name="⏱️ Duration", value=f"{minutes} minute(s)", inline=False)
         embed.add_field(name="📝 Reason", value=reason, inline=False)
         embed.set_footer(text=f"Timed out by {moderator}")
@@ -669,7 +592,6 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_messages=True)
     async def purge(self, ctx, amount: int):
-        """Deletes a number of messages from the channel."""
         if amount <= 0:
             await ctx.send("❌ Amount must be greater than 0.")
             return
@@ -680,7 +602,6 @@ class Moderation(commands.Cog):
         try:
             deleted = await ctx.channel.purge(limit=amount + 1)
             actual_deleted = len(deleted) - 1
-
             await ctx.send(
                 f"🗑️ Deleted **{actual_deleted}** message(s).",
                 delete_after=3
@@ -708,9 +629,11 @@ class Moderation(commands.Cog):
         elif isinstance(error, commands.BadArgument):
             await ctx.send("❌ Amount must be a whole number.")
 
-    @app_commands.command(name="purge", description="Deletes a number of messages from the channel.")
+    @app_commands.command(name="purge", description="Deletes a number of messages.")
     @app_commands.describe(amount="Number of messages to delete (1–100).")
     @app_commands.default_permissions(manage_messages=True)
+    @has_guild_permissions(manage_messages=True)  # ← Hard check, cannot be bypassed
+    @is_in_guild()
     async def purge_slash(self, interaction: discord.Interaction, amount: int):
         if amount <= 0:
             await interaction.response.send_message(
@@ -755,7 +678,6 @@ class Moderation(commands.Cog):
 
     @commands.command()
     async def report(self, ctx, member: discord.Member, *, reason: str):
-        """Reports a member to the mod team."""
         if member.id == ctx.author.id:
             await ctx.send("❌ You cannot report yourself.")
             return
@@ -765,12 +687,10 @@ class Moderation(commands.Cog):
 
         success = await self._submit_report(member, reason, ctx.author, ctx.channel)
         if success:
-            await ctx.send(
-                embed=discord.Embed(
-                    description="✅ Your report has been submitted.",
-                    color=discord.Color.green()
-                )
-            )
+            await ctx.send(embed=discord.Embed(
+                description="✅ Your report has been submitted.",
+                color=discord.Color.green()
+            ))
         else:
             await ctx.send("❌ Report channel not found. Please contact an admin.")
 
@@ -783,9 +703,10 @@ class Moderation(commands.Cog):
 
     @app_commands.command(name="report", description="Reports a member to the mod team.")
     @app_commands.describe(
-        member="The member you want to report.",
+        member="The member to report.",
         reason="The reason for the report."
     )
+    @is_in_guild()
     async def report_slash(
         self,
         interaction: discord.Interaction,
@@ -806,7 +727,9 @@ class Moderation(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-        success = await self._submit_report(member, reason, interaction.user, interaction.channel)
+        success = await self._submit_report(
+            member, reason, interaction.user, interaction.channel
+        )
         if success:
             await interaction.followup.send(
                 embed=discord.Embed(
@@ -821,14 +744,7 @@ class Moderation(commands.Cog):
                 ephemeral=True
             )
 
-    async def _submit_report(
-        self,
-        target: discord.Member,
-        reason: str,
-        reporter: discord.Member | discord.User,
-        source_channel: discord.TextChannel
-    ) -> bool:
-        """Helper that sends the report to the report channel. Returns True on success."""
+    async def _submit_report(self, target, reason, reporter, source_channel) -> bool:
         report_channel = self.bot.get_channel(config["REPORT_CHANNEL_ID"])
         if not report_channel:
             return False
@@ -853,7 +769,6 @@ class Moderation(commands.Cog):
 
         await report_channel.send(embed=embed)
         return True
-
 
 async def setup(bot):
     await bot.add_cog(Moderation(bot))
