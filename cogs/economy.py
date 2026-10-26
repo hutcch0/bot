@@ -295,7 +295,7 @@ class Economy(commands.Cog):
             cursor.execute("""
                 INSERT INTO users (user_id, money) VALUES (%s, %s)
                 ON DUPLICATE KEY UPDATE money = money + %s
-            """, (ctx.author.id, 1000 + amount, amount))
+            """, (user_id, 1000 + amount, amount))
             conn.commit()
 
             embed = discord.Embed(
