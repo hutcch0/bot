@@ -3,10 +3,13 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
 import json
-import random
+import os
+import urllib.error
+import urllib.request
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+from config_loader import load_config
+
+config = load_config()
 
 
 class Utility(commands.Cog):
@@ -245,38 +248,56 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def photo(self, ctx):
-        """Sends a random photo from the photo.json file."""
+        """Sends a random photo from the VPS gallery."""
         embed = self._build_photo_embed()
         if embed:
             await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ No photos found or error loading photos.")
+            await ctx.send("❌ No photos on the server yet — upload some at /photos/.")
 
-    @app_commands.command(name="photo", description="Sends a random photo.")
+    @app_commands.command(name="photo", description="Sends a random photo from the VPS gallery.")
     async def photo_slash(self, interaction: discord.Interaction):
         embed = self._build_photo_embed()
         if embed:
             await interaction.response.send_message(embed=embed)
         else:
             await interaction.response.send_message(
-                "❌ No photos found or error loading photos.",
+                "❌ No photos on the server yet — upload some at /photos/.",
                 ephemeral=True
             )
 
     def _build_photo_embed(self):
-        """Helper to pick a random photo and build an embed."""
-        try:
-            with open('photo.json', 'r') as f:
-                photos = json.load(f)
-            if not photos:
-                return None
+        """Pick a random photo from the VPS Photos API."""
+        photos_api = os.getenv("PHOTOS_API_URL", "http://photos-api:8092").rstrip("/")
+        public_base = os.getenv(
+            "PHOTOS_PUBLIC_BASE_URL",
+            "https://projectvps.duckdns.org/api/photos/file",
+        ).rstrip("/")
 
-            link = random.choice(list(photos.values()))
+        try:
+            headers = {}
+            token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+            if token:
+                headers["X-Internal-Token"] = token
+            req = urllib.request.Request(
+                f"{photos_api}/photos/random",
+                headers=headers,
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            link = payload.get("url") or f"{public_base}/{payload.get('id', '')}"
+            if not link or not payload.get("id"):
+                return None
             embed = discord.Embed(title="🖼️ Random Photo")
             embed.set_image(url=link)
             return embed
-        except Exception as e:
-            print(f"Photo command error: {e}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            print(f"Photo command error: HTTP {exc.code}")
+            return None
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as exc:
+            print(f"Photo command error: {exc}")
             return None
 
     @commands.command()
